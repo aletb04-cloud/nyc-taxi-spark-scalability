@@ -1,37 +1,48 @@
 # NYC Taxi: Big Data Processing & Scalability Study with Apache Spark
 
-Performance and scalability study of Apache Spark on **48.7 million NYC Yellow Taxi trips** (12 months of 2025, 830 MB in Parquet), run in local mode on a single laptop. Developed for the *High-Performance Computing for Big Data Analysis* course of the MSc in Big Data Analytics (UC3M).
+Performance and scalability study of Apache Spark on **48.7 million NYC Yellow Taxi trips** (12 months of 2025, 830 MB in Parquet), run in local mode on a single laptop (MacBook Air M2, 8 GB RAM). Developed for the *High-Performance Computing for Big Data Analysis* course of the MSc in Big Data Analytics (UC3M).
 
 ## What this project does
 
 1. **Traffic and financial analytics**: average speed per pickup hour, most frequent pickup-dropoff routes, trip distance per passenger count, and tips and fares by payment type.
-2. **API comparison**: the same computations (top routes, average tip per passenger count) implemented with the **DataFrame**, **Spark SQL** and **RDD** APIs. Results are identical; execution time is not.
-3. **Scalability benchmark**: execution time, speed-up and efficiency with 1, 2, 4, 6 and 8 cores (warm-up run discarded, median of 3 runs), plus the effect of data volume (1 month vs 12 months).
+2. **API comparison**: the same computations (top routes, average tip per passenger count) implemented with the **DataFrame**, **Spark SQL** and **RDD** APIs. The results are identical; the execution time is not.
+3. **Scalability benchmark**: execution time, speed-up and efficiency with 1, 2, 4, 6 and 8 cores (one discarded warm-up run, median of 3 runs per configuration).
 
 ## Key results
 
-| Finding | Result |
-|---|---|
-| Records processed | 48,722,602 (12 monthly Parquet files) |
-| RDD vs DataFrame/SQL | RDD is **24-28x slower** for identical results (Python serialization, no query optimizer) |
-| Best speed-up (whole workload) | **1.80x with 4 cores** (efficiency 0.45) |
-| Beyond 4 cores | Speed-up drops to 1.19x with 8 cores |
-| Data volume | 14x more data -> 11.5x more single-core time; speed-up and efficiency improve with larger input |
+Measured with `benchmark.py` (raw numbers in [`results/benchmark_results.csv`](results/benchmark_results.csv)):
 
-The degradation beyond 4 cores is consistent with the hardware (Apple M2: 4 performance + 4 efficiency cores, 8 GB RAM, passive cooling) and with having only 10-12 input partitions. The report separates what was measured from what is a plausible, untested explanation (memory pressure, thermal throttling). Amdahl's law is used to interpret the sequential fraction.
+| Cores | Total time (s) | Speed-up | Efficiency |
+|---|---|---|---|
+| 1 | 187.89 | 1.00 | 1.00 |
+| 2 | 135.11 | 1.39 | 0.70 |
+| 4 | 155.78 | 1.21 | 0.30 |
+| 6 | 164.47 | 1.14 | 0.19 |
+| 8 | 140.86 | 1.33 | 0.17 |
+
+- **RDD is 25-27x slower than DataFrame/SQL on one core** (25-44x depending on the number of cores) for identical results. The cause is the JVM-to-Python serialization of every row and the absence of a query optimizer. DataFrame and Spark SQL perform the same.
+- **The three RDD studies account for 92% of the single-core time**, so the total speed-up essentially follows the RDD behaviour.
+- **Scaling is far from linear.** The DataFrame/SQL studies keep improving up to 8 cores (1.57x), while the RDD studies peak at 1.40x with 2 cores and then fluctuate.
+- Only 10-12 input partitions and an Apple M2 with 4 performance + 4 efficiency cores, 8 GB of RAM and passive cooling are plausible limiting factors. They were not isolated in this study.
+
+### A note on variability
+
+The original course report (run from a Jupyter notebook, where all configurations share one Python process and a warm JVM) measured a peak speed-up of 1.80x with 4 cores. This repository launches a fresh process per run and measured a peak of 1.39x with 2 cores, with a non-monotonic curve in the RDD studies. Single-core times agree (186 s vs 188 s). The conclusion is the same in both runs: sub-linear scaling, dominated by the RDD studies, and no gain beyond a few cores on this hardware. Differences in the multi-core numbers are consistent with run-to-run noise and thermal behaviour on a fanless laptop, which was not measured separately.
 
 ## Limitations
 
-- Single laptop in local mode: the results do not prove scaling on a real cluster.
-- `tip_amount` is only recorded for card payments (cash tips are stored as 0), so average tips are underestimated.
-- Groups with 7-9 passengers are too small for reliable averages.
+- Single laptop in local mode: the results say nothing definitive about scaling on a real cluster.
+- `tip_amount` is only recorded for card payments (cash tips are stored as 0), so the average tips are underestimated.
+- Groups of 7-9 passengers are too small for reliable averages.
 
 ## Repository structure
 
 ```
 .
-├── project_taxis.ipynb   # full analysis and benchmark
-├── docs/                 # project report (PDF)
+├── download_data.py    # downloads the monthly Parquet files from the TLC
+├── taxi_analysis.py    # the four studies; prints results and timings
+├── benchmark.py        # runs taxi_analysis.py with 1-8 cores, writes results and plots
+├── results/            # benchmark_results.csv and plots
 ├── requirements.txt
 └── README.md
 ```
@@ -42,13 +53,16 @@ The degradation beyond 4 cores is consistent with the hardware (Apple M2: 4 perf
 
 ```bash
 git clone https://github.com/aletb04-cloud/nyc-taxi-spark-scalability.git
-cd NOMBRE-DEL-REPO
+cd nyc-taxi-spark-scalability
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-jupyter notebook project_taxis.ipynb
+
+python download_data.py --start 2025-01 --months 12   # ~830 MB into ./data
+python taxi_analysis.py --cores 4                     # one run of all studies
+python benchmark.py                                   # full benchmark (about 40-60 min)
 ```
 
-The notebook downloads the monthly Parquet files from the NYC TLC into a local `data/` folder (not included in the repository). By default it is set to a few months for quick testing; to reproduce the report, set `months=12` in the `download_dataset(...)` call (start `2025-01`) and run all cells. The benchmark takes a while on 12 months because the RDD studies are slow by design.
+`benchmark.py` writes `benchmark_results.csv`, `speedup_plot.png` and `efficiency_plot.png` in the current folder. For reliable timings, plug in the laptop, close other applications and do not use it during the run.
 
 ## Data
 
